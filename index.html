@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tớ Có Điều Muốn Nói!</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tone.js for sound effects -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <!-- Three.js for 3D Heart -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            animation: gradient-animation 10s ease infinite;
+            background-size: 200% 200%;
+        }
+        .screen {
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1.5rem;
+            text-align: center;
+            transition: opacity 0.5s ease-in-out, transform 0.5s ease-in-out;
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            transform: scale(0.95);
+        }
+        .visible-screen {
+            display: flex;
+            opacity: 1;
+            transform: scale(1);
+        }
+        /* Modal Overlay & Letter Modal */
+        .modal-overlay, .letter-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease;
+        }
+        .modal-overlay.visible, .letter-overlay.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+        .letter-content {
+            background-color: #fff8e1; /* Off-white for letter paper effect */
+            border: 5px solid #d4c185;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow-y: auto;
+            text-align: left;
+            padding: 2rem;
+            border-radius: 12px;
+            position: relative;
+            transform: rotate(-1deg);
+        }
+        /* Gradient Animation */
+        @keyframes gradient-animation {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        /* Confetti Effect */
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #f00;
+            border-radius: 50%;
+            opacity: 0;
+            animation: confetti-fall 3s ease-out forwards;
+        }
+        @keyframes confetti-fall {
+            0% { transform: translateY(-100vh) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+        }
+        /* Falling Hearts Effect */
+        .falling-heart {
+            position: absolute;
+            color: #ef4444; /* red-500 */
+            font-size: 2rem;
+            animation: heart-fall 10s ease-in infinite;
+            pointer-events: none;
+        }
+        @keyframes heart-fall {
+            0% { transform: translateY(-10vh) translateX(0) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(100vh) translateX(50px) rotate(360deg); opacity: 0; }
+        }
+        /* Running Button Fix */
+        #no-btn {
+            /* Ensures smooth movement when position is set to fixed/absolute by JS */
+            transition: all 0.2s ease-out !important; 
+        }
+        /* Initially hide the choice buttons */
+        .choice-buttons {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+        .choice-buttons.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+        /* 3D Canvas Container */
+        #heart-3d-container {
+            width: 100%;
+            max-width: 300px; /* Limit size for desktop, but fluid for mobile */
+            height: 250px;
+            margin: 1.5rem auto;
+            overflow: hidden;
+            border-radius: 1rem;
+            box-shadow: 0 4px 20px rgba(255, 0, 77, 0.3);
+        }
+        #heart-3d-container canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100">
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, serverTimestamp, query, orderBy, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase global variables
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Initialize Firebase services
+        let app;
+        let db;
+        let auth;
+        let userId = null;
+        let visitorsColRef;
+        let noButtonClicks = 0;
+        let fallingHeartsInterval;
+        
+        // Three.js Globals
+        let scene, camera, renderer, heartMesh;
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        const heartContainer = document.getElementById('heart-3d-container');
+
+        // UI elements and screens
+        const screens = {
+            loading: document.getElementById('loading-screen'),
+            welcome: document.getElementById('welcome-screen'),
+            confession: document.getElementById('confession-screen'),
+            result: document.getElementById('result-screen'),
+        };
+        const nameInput = document.getElementById('name-input');
+        const enterBtn = document.getElementById('enter-btn');
+        const visitorsList = document.getElementById('visitors-list');
+        const visitorCount = document.getElementById('visitor-count');
+        const changeNameBtn = document.getElementById('change-name-btn');
+        const modalOverlay = document.getElementById('modal-overlay');
+        const modalMessage = document.getElementById('modal-message');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+        const noBtn = document.getElementById('no-btn');
+        const yesBtn = document.getElementById('yes-btn');
+        const confessionHeading = document.getElementById('confession-heading');
+        const choiceButtonsContainer = document.getElementById('choice-buttons-container');
+        
+        // FIX: Define resultTitle and resultMessage
+        const resultTitle = document.getElementById('result-title');
+        const resultMessage = document.getElementById('result-message');
+        
+        // New Letter Elements
+        const readLetterBtn = document.getElementById('read-letter-btn');
+        const letterOverlay = document.getElementById('letter-overlay');
+        const letterContentDiv = document.getElementById('letter-content-div');
+        const closeLetterBtn = document.getElementById('close-letter-btn');
+        let recipientName = "cậu";
+        
+        // Tone.js Synth for music and effects
+        const synthYes = new Tone.Synth().toDestination();
+        const synthNo = new Tone.Synth().toDestination();
+        let backgroundLoop;
+        let isAudioStarted = false;
+
+        // --- Core Functions ---
+
+        // Function to start background music (must be called after user interaction)
+        const startBackgroundMusic = async () => {
+            if (isAudioStarted) return;
+            isAudioStarted = true;
+            await Tone.start();
+            
+            // Simple romantic chord progression (Cmaj7 - Am7 - Fmaj7 - G7)
+            const chords = [["C4", "E4", "G4", "B4"], ["A3", "C4", "E4", "G4"], ["F3", "A3", "C4", "E4"], ["G3", "B3", "D4", "F4"]];
+            let chordIndex = 0;
+
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.5, decay: 0.2, sustain: 0.5, release: 1 },
+                volume: -10 // Keep it quiet and ambient
+            }).toDestination();
+
+            backgroundLoop = new Tone.Loop((time) => {
+                const chord = chords[chordIndex % chords.length];
+                synth.triggerAttackRelease(chord, "2n", time);
+                chordIndex++;
+            }, "2n").start(0);
+
+            Tone.Transport.start();
+        };
+
+        // Function to vibrate the device (Haptic Feedback)
+        const vibrateDevice = (pattern) => {
+            if (navigator.vibrate) {
+                navigator.vibrate(pattern);
+            }
+        };
+
+        // Function to reset the No button's state and position
+        const resetNoButtonPosition = () => {
+            noBtn.style.position = '';
+            noBtn.style.transform = '';
+            noBtn.style.zIndex = '';
+            noBtn.classList.remove('absolute', 'fixed', 'top-0', 'left-0'); 
+            noBtn.classList.add('transition-all', 'duration-300', 'transform', 'hover:scale-105');
+        };
+
+        // Function to transition between screens
+        const showScreen = (screenId) => {
+            Object.values(screens).forEach(screen => {
+                screen.classList.remove('visible-screen');
+                if (fallingHeartsInterval) {
+                    clearInterval(fallingHeartsInterval);
+                }
+            });
+            
+            if (screenId !== 'confession') {
+                resetNoButtonPosition();
+                if (backgroundLoop) Tone.Transport.stop();
+            }
+
+            if (screenId === 'confession') {
+                startFallingHearts();
+                choiceButtonsContainer.classList.remove('active');
+                readLetterBtn.classList.remove('hidden');
+                // Start 3D heart animation and audio when confession screen loads
+                if (heartMesh) animateHeart();
+            } else if (screenId === 'result') {
+                resetNoButtonAndYesButton();
+            }
+
+            screens[screenId].classList.add('visible-screen');
+        };
+
+        // Function to show modal
+        const showModal = (message) => {
+            modalMessage.textContent = message;
+            modalOverlay.classList.add('visible');
+        };
+
+        // Function to check and set the user's name
+        const checkUserName = async () => {
+            if (!userId) {
+                console.error("User ID is not available.");
+                return;
+            }
+
+            const visitorDocRef = doc(db, visitorsColRef.path, userId);
+            const docSnap = await getDoc(visitorDocRef);
+
+            if (docSnap.exists()) {
+                const visitorData = docSnap.data();
+                recipientName = visitorData.name;
+                confessionHeading.textContent = `${recipientName} ơi, tớ có điều muốn nói!`;
+                showScreen('confession');
+            } else {
+                showScreen('welcome');
+            }
+        };
+        
+        // Function to create confetti effect
+        const createConfetti = () => {
+            const confettiColors = ['#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3', '#03a9f4', '#00bcd4', '#009688', '#4caf50', '#8bc34a', '#cddc39', '#ffeb3b', '#ffc107', '#ff9800', '#ff5722', '#795548', '#9e9e9e', '#607d8b'];
+            for (let i = 0; i < 100; i++) {
+                const confetti = document.createElement('div');
+                confetti.classList.add('confetti');
+                confetti.style.left = `${Math.random() * 100}vw`;
+                confetti.style.backgroundColor = confettiColors[Math.floor(Math.random() * confettiColors.length)];
+                confetti.style.animationDelay = `${Math.random() * 2}s`;
+                document.body.appendChild(confetti);
+
+                confetti.addEventListener('animationend', () => {
+                    confetti.remove();
+                });
+            }
+        };
+
+        // Function to create falling hearts effect
+        const createFallingHeart = () => {
+            const heart = document.createElement('div');
+            heart.innerHTML = '&#x2764;';
+            heart.classList.add('falling-heart');
+            heart.style.left = `${Math.random() * 100}vw`;
+            heart.style.animationDuration = `${Math.random() * 8 + 5}s`;
+            heart.style.opacity = `${Math.random() * 0.5 + 0.5}`;
+            document.body.appendChild(heart);
+        };
+        const startFallingHearts = () => {
+            document.querySelectorAll('.falling-heart').forEach(h => h.remove());
+            if (fallingHeartsInterval) clearInterval(fallingHeartsInterval);
+            fallingHeartsInterval = setInterval(createFallingHeart, 300);
+        };
+
+        // --- Three.js Logic for 3D Heart ---
+        const initThreeDHeart = () => {
+            // Setup Scene
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, heartContainer.offsetWidth / heartContainer.offsetHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(heartContainer.offsetWidth, heartContainer.offsetHeight);
+            heartContainer.appendChild(renderer.domElement);
+
+            // Add Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            const pointLight = new THREE.PointLight(0xff44aa, 1.5);
+            pointLight.position.set(5, 5, 5);
+            scene.add(pointLight);
+
+            // Create Heart Mesh (Use Icosahedron for smooth, rounded look)
+            const geometry = new THREE.IcosahedronGeometry(1.5, 0); // Size 1.5
+            const material = new THREE.MeshPhongMaterial({ color: 0xff0044, shininess: 100 });
+            heartMesh = new THREE.Mesh(geometry, material);
+            scene.add(heartMesh);
+
+            camera.position.z = 3;
+
+            // Handle Resize
+            const onResize = () => {
+                const width = heartContainer.offsetWidth;
+                const height = heartContainer.offsetHeight;
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+                renderer.setSize(width, height);
+            };
+            window.addEventListener('resize', onResize);
+            onResize(); // Initial resize call
+
+            // Mouse/Touch Interaction
+            heartContainer.addEventListener('mousedown', onPointerDown);
+            heartContainer.addEventListener('touchstart', onPointerDown);
+            window.addEventListener('mouseup', onPointerUp);
+            window.addEventListener('touchend', onPointerUp);
+            window.addEventListener('mousemove', onPointerMove);
+            window.addEventListener('touchmove', onPointerMove);
+        };
+
+        const onPointerDown = (event) => {
+            event.preventDefault();
+            isDragging = true;
+            previousMousePosition.x = event.clientX || event.touches[0].clientX;
+            previousMousePosition.y = event.clientY || event.touches[0].clientY;
+        };
+
+        const onPointerUp = () => {
+            isDragging = false;
+        };
+
+        const onPointerMove = (event) => {
+            if (!isDragging || !heartMesh) return;
+            event.preventDefault();
+
+            const clientX = event.clientX || event.touches[0].clientX;
+            const clientY = event.clientY || event.touches[0].clientY;
+
+            const deltaX = clientX - previousMousePosition.x;
+            const deltaY = clientY - previousMousePosition.y;
+
+            heartMesh.rotation.y += deltaX * 0.01;
+            heartMesh.rotation.x += deltaY * 0.01;
+
+            previousMousePosition.x = clientX;
+            previousMousePosition.y = clientY;
+        };
+
+        const animateHeart = () => {
+            requestAnimationFrame(animateHeart);
+            if (!heartMesh) return;
+
+            const time = performance.now() * 0.001;
+            
+            // Auto-rotation when not dragging
+            if (!isDragging) {
+                heartMesh.rotation.y += 0.005;
+            }
+
+            // Pulsation effect (Heartbeat)
+            const scaleFactor = 1.0 + Math.sin(time * 5) * 0.05; 
+            heartMesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+            renderer.render(scene, camera);
+        };
+
+        // --- Firebase Initialization and Auth ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            showScreen('loading');
+            initThreeDHeart(); // Initialize 3D heart immediately
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Authenticated user with ID:", userId);
+                        visitorsColRef = collection(db, `artifacts/${appId}/public/data/visitors`);
+                        
+                        checkUserName();
+
+                        const q = query(visitorsColRef, orderBy('timestamp', 'desc'));
+                        onSnapshot(q, (snapshot) => {
+                            visitorsList.innerHTML = '';
+                            visitorCount.textContent = `Tổng cộng: ${snapshot.size} người`;
+                            snapshot.forEach((doc) => {
+                                const visitor = doc.data();
+                                const li = document.createElement('li');
+                                li.textContent = visitor.name;
+                                li.classList.add('p-2', 'bg-gray-100', 'rounded-lg', 'shadow-sm', 'border', 'border-gray-200');
+                                visitorsList.appendChild(li);
+                            });
+                        });
+                        
+                    } else {
+                        console.error("User not authenticated.");
+                        showScreen('loading');
+                    }
+                });
+            } catch (error) {
+                console.error("Lỗi khi kết nối với Firebase:", error);
+                showScreen('welcome'); 
+                document.getElementById('welcome-message').textContent = 'Lỗi kết nối. Vui lòng thử lại!';
+            }
+        });
+
+        // --- Main App Logic ---
+        enterBtn.addEventListener('click', async () => {
+            const name = nameInput.value.trim();
+            if (name === '') {
+                showModal('Vui lòng nhập tên của bạn!');
+                return;
+            }
+
+            try {
+                const visitorDocRef = doc(db, visitorsColRef.path, userId);
+                await setDoc(visitorDocRef, {
+                    name: name,
+                    timestamp: serverTimestamp(),
+                });
+                recipientName = name;
+                confessionHeading.textContent = `${name} ơi, tớ có điều muốn nói!`;
+                
+                // Start music after first interaction
+                startBackgroundMusic(); 
+                showScreen('confession');
+            } catch (error) {
+                console.error("Lỗi khi lưu tên:", error);
+                showModal('Có lỗi xảy ra. Vui lòng thử lại!');
+            }
+        });
+
+        // --- Letter Logic ---
+        readLetterBtn.addEventListener('click', () => {
+            letterContentDiv.innerHTML = `
+                <h3 class="text-3xl font-serif font-bold text-gray-800 border-b-2 border-pink-300 pb-3 mb-6">Bức Thư Tỏ Tình</h3>
+                <p class="text-xl font-semibold mb-4 text-pink-600">Gửi ${recipientName} của tớ,</p>
+                <p class="mb-4 text-gray-700 leading-relaxed italic">
+                    Từ lâu rồi, tớ đã muốn nói điều này. Cậu không chỉ là một người bạn tuyệt vời mà còn là ánh sáng trong những ngày u ám của tớ.
+                    Mỗi lần thấy thấy cậu, tim tớ lại đập nhanh hơn một chút, giống như trái tim 3D ở ngoài kia vậy. Cảm ơn cậu vì đã xuất hiện trong cuộc đời tớ.
+                </p>
+                <p class="mb-6 text-gray-700 leading-relaxed italic">
+                    Hôm nay, tớ muốn bước thêm một bước. Tớ không muốn chỉ là bạn nữa. Tớ muốn chăm sóc, quan tâm và yêu thương cậu mỗi ngày.
+                    Tình cảm tớ dành cho cậu là thật lòng, và tớ hy vọng cậu sẽ cảm nhận được điều đó. Tớ yêu cậu!
+                </p>
+                <p class="text-lg font-bold text-gray-800 pt-4">
+                    Tình yêu này, tớ dành trọn cho cậu.
+                </p>
+                <p class="text-right text-md font-semibold text-gray-600 mt-8">
+                    Người yêu cậu (hoặc hy vọng sẽ là người yêu cậu),<br>
+                    [Tên của bạn]
+                </p>
+            `;
+            letterOverlay.classList.add('visible');
+        });
+
+        closeLetterBtn.addEventListener('click', () => {
+            letterOverlay.classList.remove('visible');
+            readLetterBtn.classList.add('hidden');
+            choiceButtonsContainer.classList.add('active');
+        });
+
+
+        // --- Nút "Không đồng ý" chạy trốn - Tối ưu cho ĐIỆN THOẠI và MÁY TÍNH ---
+        const moveNoButton = () => {
+            if (!choiceButtonsContainer.classList.contains('active')) return;
+            vibrateDevice([50, 50, 50]); // Quick triple tap when running away (mobile wow)
+
+            if (noBtn.style.position !== 'fixed') {
+                const rect = noBtn.getBoundingClientRect();
+                noBtn.style.position = 'fixed';
+                noBtn.style.left = `${rect.left}px`;
+                noBtn.style.top = `${rect.top}px`;
+                noBtn.style.zIndex = '50'; 
+                yesBtn.classList.add('w-full');
+            }
+            
+            const buttonWidth = noBtn.offsetWidth;
+            const buttonHeight = noBtn.offsetHeight;
+            
+            const maxX = window.innerWidth - buttonWidth - 20;
+            const maxY = window.innerHeight - buttonHeight - 20;
+            
+            const randomX = Math.random() * maxX + 10;
+            const randomY = Math.random() * maxY + 10;
+            
+            noBtn.style.left = `${randomX}px`;
+            noBtn.style.top = `${randomY}px`;
+        };
+
+        const resetNoButtonAndYesButton = () => {
+            resetNoButtonPosition();
+            yesBtn.classList.remove('w-full');
+        };
+
+        // Bind events for desktop (mouseenter) and mobile (touchstart)
+        noBtn.addEventListener('mouseenter', moveNoButton);
+        noBtn.addEventListener('touchstart', moveNoButton);
+
+        yesBtn.addEventListener('click', () => {
+            vibrateDevice([300]); // Long, positive hum (mobile wow)
+            resetNoButtonAndYesButton();
+            resultTitle.textContent = 'Yêu cậu nhiều lắm!';
+            resultMessage.textContent = 'Câu trả lời của cậu đã làm tớ hạnh phúc vô cùng. Tớ yêu cậu!';
+            showScreen('result');
+            createConfetti();
+            synthYes.triggerAttackRelease("C4", "8n");
+            synthYes.triggerAttackRelease("E4", "8n", "+0.2");
+            synthYes.triggerAttackRelease("G4", "8n", "+0.4");
+        });
+
+        noBtn.addEventListener('click', () => {
+            vibrateDevice([500]); // Firm, dramatic buzz
+            resetNoButtonAndYesButton(); 
+            
+            noButtonClicks++;
+            if (noButtonClicks === 1) {
+                noBtn.textContent = 'Cậu có chắc không?';
+                showModal('Cậu có chắc không? Tớ buồn lắm đó...');
+                choiceButtonsContainer.classList.add('active'); 
+            } else if (noButtonClicks === 2) {
+                noBtn.textContent = 'Chắc chắn chứ?';
+                showModal('Một lần nữa nhé?');
+                choiceButtonsContainer.classList.add('active'); 
+            } else {
+                resultTitle.textContent = 'Thôi mà...';
+                resultMessage.textContent = 'Hãy cho tớ một cơ hội nữa nhé? Tớ vẫn muốn làm bạn với cậu.';
+                showScreen('result');
+                synthNo.triggerAttackRelease("C3", "4n");
+                synthNo.triggerAttackRelease("B2", "4n", "+0.5");
+                synthNo.triggerAttackRelease("A2", "4n", "+1.0");
+            }
+        });
+
+        changeNameBtn.addEventListener('click', () => {
+            showScreen('welcome');
+            noButtonClicks = 0;
+            noBtn.textContent = 'Không đồng ý';
+            resetNoButtonAndYesButton();
+        });
+
+        modalCloseBtn.addEventListener('click', () => {
+            modalOverlay.classList.remove('visible');
+        });
+    </script>
+
+    <!-- Screen 0: Loading -->
+    <div id="loading-screen" class="screen visible-screen">
+        <svg class="animate-spin h-8 w-8 text-pink-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p class="mt-4 text-gray-500">Đang tải...</p>
+    </div>
+
+    <!-- Screen 1: Welcome -->
+    <div id="welcome-screen" class="screen">
+        <div class="p-8 bg-white rounded-3xl shadow-xl border border-pink-200 w-full max-w-sm">
+            <h1 class="text-3xl font-bold text-pink-500 mb-4">Chào mừng đến với trang web của tớ!</h1>
+            <p id="welcome-message" class="text-gray-600 mb-6">Bạn tên gì? Nhập tên vào đây nhé!</p>
+            <input type="text" id="name-input" placeholder="Tên của bạn" class="w-full p-3 rounded-lg border border-pink-300 text-center mb-4 focus:outline-none focus:ring-2 focus:ring-pink-500">
+            <button id="enter-btn" class="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-3 px-8 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105">
+                Đi thôi!
+            </button>
+        </div>
+    </div>
+
+    <!-- Screen 2: The Confession with Visitor Log -->
+    <div id="confession-screen" class="screen">
+        <div class="p-8 bg-white rounded-3xl shadow-xl border border-pink-200 w-full max-w-sm">
+            <h2 id="confession-heading" class="text-2xl font-bold text-pink-600 mb-6"></h2>
+            
+            <!-- 3D Heart Container -->
+            <div id="heart-3d-container" class="rounded-xl shadow-lg">
+                <!-- Three.js Canvas will be placed here -->
+            </div>
+            
+            <!-- Letter Button -->
+            <button id="read-letter-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-8 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105 mb-6">
+                💌 Mở Bức Thư Tỏ Tình
+            </button>
+
+            <!-- Choice Buttons Container - Initially Hidden -->
+            <div id="choice-buttons-container" class="flex flex-col sm:flex-row justify-center gap-4 choice-buttons">
+                <button id="yes-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105">
+                    Đồng ý
+                </button>
+                <!-- Nút Không đồng ý chạy trốn sẽ dùng position: fixed để chạy khắp màn hình -->
+                <button id="no-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105">
+                    Không đồng ý
+                </button>
+            </div>
+            <div class="mt-8 border-t border-pink-200 pt-4">
+                <h3 class="text-lg font-bold text-gray-700 mb-2">Những người đã ghé thăm:</h3>
+                <p id="visitor-count" class="text-sm text-gray-500 mb-2"></p>
+                <ul id="visitors-list" class="space-y-2 text-left text-gray-800 text-sm max-h-40 overflow-y-auto">
+                    <!-- Visitor names will be populated here -->
+                </ul>
+                <button id="change-name-btn" class="mt-4 text-sm text-purple-500 hover:text-purple-600 transition-colors">Đổi tên</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 3: The Result -->
+    <div id="result-screen" class="screen">
+        <div class="p-8 bg-white rounded-3xl shadow-xl border border-pink-200 w-full max-w-sm">
+            <h2 id="result-title" class="text-3xl font-bold text-pink-600 mb-4"></h2>
+            <p id="result-message" class="text-lg text-gray-700"></p>
+        </div>
+    </div>
+
+    <!-- Modal for notifications -->
+    <div id="modal-overlay" class="modal-overlay">
+        <div class="p-8 bg-white rounded-3xl shadow-xl border border-pink-200 w-full max-w-xs text-center">
+            <p id="modal-message" class="text-gray-700 mb-4"></p>
+            <button id="modal-close-btn" class="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-2 px-4 rounded-full">
+                Đóng
+            </button>
+        </div>
+    </div>
+
+    <!-- Letter Modal (New) -->
+    <div id="letter-overlay" class="letter-overlay">
+        <div class="letter-content w-full max-w-xl">
+            <div id="letter-content-div" class="text-base sm:text-lg">
+                <!-- Letter content will be inserted by JS -->
+            </div>
+            <div class="text-center mt-8">
+                <button id="close-letter-btn" class="bg-pink-500 hover:bg-pink-600 text-white font-bold py-3 px-8 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105">
+                    Đã đọc, tớ đã hiểu!
+                </button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
