@@ -7,7 +7,7 @@
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Tone.js for sound effects -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <!-- Three.js for 3D Heart -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -35,6 +35,7 @@
             display: flex;
             opacity: 1;
             transform: scale(1);
+            position: relative; /* Dùng relative để chạy nút No được */
         }
         /* Modal Overlay & Letter Modal */
         .modal-overlay, .letter-overlay {
@@ -133,25 +134,25 @@
 </head>
 <body class="bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100">
 
-    <!-- Firebase SDKs -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, serverTimestamp, query, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // Danh sách khách truy cập giả lập (Mock data)
+        const MOCK_VISITORS = [
+            { name: 'Minh' }, 
+            { name: 'Khánh' }, 
+            { name: 'Phương' }, 
+            { name: 'Trang' },
+            { name: 'Anh' }, 
+            { name: 'Tú' }, 
+            { name: 'Thảo' }, 
+            { name: 'Hoàng' },
+            { name: 'Linh' }, 
+            { name: 'Bảo' },
+        ];
 
-        // Firebase global variables
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' && __firebase_config ? __firebase_config : '{}'); 
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        // Initialize Firebase services
-        let app;
-        let db;
-        let auth;
-        let userId = null;
-        let visitorsColRef;
+        // --- Global Variables (Không dùng Firebase nữa) ---
         let noButtonClicks = 0;
         let fallingHeartsInterval;
+        let recipientName = "cậu";
         
         // Three.js Globals
         let scene, camera, renderer, heartMesh;
@@ -161,7 +162,6 @@
 
         // UI elements and screens
         const screens = {
-            loading: document.getElementById('loading-screen'),
             welcome: document.getElementById('welcome-screen'),
             confession: document.getElementById('confession-screen'),
             result: document.getElementById('result-screen'),
@@ -183,12 +183,11 @@
         const resultMessage = document.getElementById('result-message');
         const welcomeMessage = document.getElementById('welcome-message'); 
         
-        // New Letter Elements
+        // Letter Elements
         const readLetterBtn = document.getElementById('read-letter-btn');
         const letterOverlay = document.getElementById('letter-overlay');
         const letterContentDiv = document.getElementById('letter-content-div');
         const closeLetterBtn = document.getElementById('close-letter-btn');
-        let recipientName = "cậu";
         
         // Tone.js Synth for music and effects
         const synthYes = new Tone.Synth().toDestination();
@@ -197,6 +196,20 @@
         let isAudioStarted = false;
 
         // --- Core Functions ---
+
+        // Khởi tạo danh sách khách giả
+        const initializeMockVisitors = () => {
+            visitorsList.innerHTML = '';
+            // Cộng thêm 1 (là người dùng hiện tại) vào tổng số
+            visitorCount.textContent = `Tổng cộng: ${MOCK_VISITORS.length + 1} người đã ghé thăm!`;
+            
+            MOCK_VISITORS.forEach((visitor) => {
+                const li = document.createElement('li');
+                li.textContent = visitor.name; 
+                li.classList.add('p-2', 'bg-gray-100', 'rounded-lg', 'shadow-sm', 'border', 'border-gray-200');
+                visitorsList.appendChild(li);
+            });
+        };
 
         // Function to start background music (must be called after user interaction)
         const startBackgroundMusic = async () => {
@@ -211,7 +224,7 @@
             const synth = new Tone.PolySynth(Tone.Synth, {
                 oscillator: { type: "sine" },
                 envelope: { attack: 0.5, decay: 0.2, sustain: 0.5, release: 1 },
-                volume: -10 // Keep it quiet and ambient
+                volume: -10 
             }).toDestination();
 
             backgroundLoop = new Tone.Loop((time) => {
@@ -257,8 +270,10 @@
                 startFallingHearts();
                 choiceButtonsContainer.classList.remove('active');
                 readLetterBtn.classList.remove('hidden');
-                // Start 3D heart animation and audio when confession screen loads
+                // Khởi động 3D heart
                 if (heartMesh) animateHeart();
+                // Cập nhật tên người dùng hiện tại vào danh sách giả
+                updateCurrentUserInVisitors();
             } else if (screenId === 'result') {
                 resetNoButtonAndYesButton();
             }
@@ -272,19 +287,13 @@
             modalOverlay.classList.add('visible');
         };
 
-        // Function to check and set the user's name
-        const checkUserName = async () => {
-            if (!userId) {
-                console.error("User ID is not available.");
-                return;
-            }
+        // Hàm cập nhật tên người dùng hiện tại (lưu trong localStorage)
+        const checkUserName = () => {
+            const storedName = localStorage.getItem('recipientName');
+            initializeMockVisitors(); // Khởi tạo danh sách khách giả
 
-            const visitorDocRef = doc(db, visitorsColRef.path, userId);
-            const docSnap = await getDoc(visitorDocRef);
-
-            if (docSnap.exists()) {
-                const visitorData = docSnap.data();
-                recipientName = visitorData.name;
+            if (storedName) {
+                recipientName = storedName;
                 confessionHeading.textContent = `${recipientName} ơi, tớ có điều muốn nói!`;
                 showScreen('confession');
             } else {
@@ -292,6 +301,21 @@
                 welcomeMessage.textContent = 'Bạn tên gì? Nhập tên vào đây nhé!'; 
             }
         };
+
+        // Cập nhật tên người dùng hiện tại vào đầu danh sách giả
+        const updateCurrentUserInVisitors = () => {
+             // Thêm tên người dùng hiện tại vào đầu danh sách (dù là mock)
+            const currentUserLi = document.createElement('li');
+            currentUserLi.textContent = `${recipientName} (Bạn)`; 
+            currentUserLi.classList.add('p-2', 'bg-pink-200', 'rounded-lg', 'shadow-md', 'border', 'border-pink-300', 'font-bold');
+            
+            // Xóa tên cũ (nếu có) trước khi thêm
+            const existingCurrentUser = visitorsList.querySelector('.bg-pink-200');
+            if (existingCurrentUser) {
+                existingCurrentUser.remove();
+            }
+            visitorsList.prepend(currentUserLi);
+        }
         
         // Function to create confetti effect
         const createConfetti = () => {
@@ -343,7 +367,7 @@
             scene.add(pointLight);
 
             // Create Heart Mesh (Use Icosahedron for smooth, rounded look)
-            const geometry = new THREE.IcosahedronGeometry(1.5, 0); // Size 1.5
+            const geometry = new THREE.IcosahedronGeometry(1.5, 0); 
             const material = new THREE.MeshPhongMaterial({ color: 0xff0044, shininess: 100 });
             heartMesh = new THREE.Mesh(geometry, material);
             scene.add(heartMesh);
@@ -416,89 +440,28 @@
             renderer.render(scene, camera);
         };
 
-        // --- Firebase Initialization and Auth ---
-        document.addEventListener('DOMContentLoaded', async () => {
-            showScreen('loading');
-            initThreeDHeart(); // Initialize 3D heart immediately
-            try {
-                // Thử khởi tạo Firebase
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        console.log("Authenticated user with ID:", userId);
-                        // Sử dụng collection public để mọi người thấy nhau
-                        visitorsColRef = collection(db, `artifacts/${appId}/public/data/visitors`);
-                        
-                        checkUserName();
-
-                        // FIX QUAN TRỌNG: Loại bỏ mọi logic sắp xếp và xử lý timestamp phức tạp
-                        const q = query(visitorsColRef);
-                        onSnapshot(q, (snapshot) => {
-                            visitorsList.innerHTML = '';
-                            visitorCount.textContent = `Tổng cộng: ${snapshot.size} người`;
-                            
-                            snapshot.forEach((doc) => {
-                                const visitor = doc.data();
-                                const li = document.createElement('li');
-                                // Chỉ hiển thị tên, loại bỏ dependency vào timestamp
-                                li.textContent = visitor.name; 
-                                li.classList.add('p-2', 'bg-gray-100', 'rounded-lg', 'shadow-sm', 'border', 'border-gray-200');
-                                visitorsList.appendChild(li);
-                            });
-                        }, (error) => {
-                             // Xử lý lỗi nếu onSnapshot thất bại (thường do lỗi kết nối hoặc quy tắc bảo mật)
-                            console.error("Lỗi khi lắng nghe danh sách khách truy cập:", error);
-                            // Thay vì crash, chỉ hiển thị lỗi và vẫn cho người dùng vào
-                            welcomeMessage.textContent = 'Lỗi cập nhật danh sách khách. Vui lòng thử lại!';
-                        });
-                        
-                    } else {
-                        console.error("User not authenticated.");
-                        showScreen('welcome');
-                    }
-                });
-            } catch (error) {
-                console.error("Lỗi khi kết nối với Firebase:", error);
-                showScreen('welcome'); 
-                welcomeMessage.textContent = 'Lỗi kết nối. Vui lòng thử lại!';
-            }
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            initThreeDHeart(); // Initialize 3D heart
+            checkUserName(); // Bắt đầu kiểm tra tên người dùng (dùng localStorage)
         });
 
         // --- Main App Logic ---
-        enterBtn.addEventListener('click', async () => {
+        enterBtn.addEventListener('click', () => {
             const name = nameInput.value.trim();
             if (name === '') {
                 showModal('Vui lòng nhập tên của bạn!');
                 return;
             }
-
-            try {
-                const visitorDocRef = doc(db, visitorsColRef.path, userId);
-                await setDoc(visitorDocRef, {
-                    name: name,
-                    // Vẫn giữ serverTimestamp để ghi lại thời gian tạo (cần thiết cho Firebase)
-                    timestamp: serverTimestamp(),
-                });
-                recipientName = name;
-                confessionHeading.textContent = `${name} ơi, tớ có điều muốn nói!`;
-                
-                // Start music after first interaction
-                startBackgroundMusic(); 
-                showScreen('confession');
-            } catch (error) {
-                console.error("Lỗi khi lưu tên:", error);
-                showModal('Có lỗi xảy ra. Vui lòng thử lại!');
-            }
+            
+            // Lưu tên vào localStorage
+            localStorage.setItem('recipientName', name);
+            recipientName = name;
+            confessionHeading.textContent = `${name} ơi, tớ có điều muốn nói!`;
+            
+            // Start music after first interaction
+            startBackgroundMusic(); 
+            showScreen('confession');
         });
 
         // --- Letter Logic ---
@@ -535,7 +498,7 @@
         // --- Nút "Không đồng ý" chạy trốn - Tối ưu cho ĐIỆN THOẠI và MÁY TÍNH ---
         const moveNoButton = () => {
             if (!choiceButtonsContainer.classList.contains('active')) return;
-            vibrateDevice([50, 50, 50]); // Quick triple tap when running away (mobile wow)
+            vibrateDevice([50, 50, 50]); 
 
             if (noBtn.style.position !== 'fixed') {
                 const rect = noBtn.getBoundingClientRect();
@@ -569,7 +532,7 @@
         noBtn.addEventListener('touchstart', moveNoButton);
 
         yesBtn.addEventListener('click', () => {
-            vibrateDevice([300]); // Long, positive hum (mobile wow)
+            vibrateDevice([300]); 
             resetNoButtonAndYesButton();
             resultTitle.textContent = 'Yêu cậu nhiều lắm!';
             resultMessage.textContent = 'Câu trả lời của cậu đã làm tớ hạnh phúc vô cùng. Tớ yêu cậu!';
@@ -581,7 +544,7 @@
         });
 
         noBtn.addEventListener('click', () => {
-            vibrateDevice([500]); // Firm, dramatic buzz
+            vibrateDevice([500]); 
             resetNoButtonAndYesButton(); 
             
             noButtonClicks++;
@@ -604,6 +567,7 @@
         });
 
         changeNameBtn.addEventListener('click', () => {
+            localStorage.removeItem('recipientName');
             showScreen('welcome');
             noButtonClicks = 0;
             noBtn.textContent = 'Không đồng ý';
@@ -615,17 +579,8 @@
         });
     </script>
 
-    <!-- Screen 0: Loading -->
-    <div id="loading-screen" class="screen visible-screen">
-        <svg class="animate-spin h-8 w-8 text-pink-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <p class="mt-4 text-gray-500">Đang tải...</p>
-    </div>
-
-    <!-- Screen 1: Welcome -->
-    <div id="welcome-screen" class="screen">
+    <!-- Screen 1: Welcome (Bắt đầu ngay tại đây) -->
+    <div id="welcome-screen" class="screen visible-screen">
         <div class="p-8 bg-white rounded-3xl shadow-xl border border-pink-200 w-full max-w-sm">
             <h1 class="text-3xl font-bold text-pink-500 mb-4">Chào mừng đến với trang web của tớ!</h1>
             <p id="welcome-message" class="text-gray-600 mb-6">Bạn tên gì? Nhập tên vào đây nhé!</p>
@@ -636,7 +591,7 @@
         </div>
     </div>
 
-    <!-- Screen 2: The Confession with Visitor Log -->
+    <!-- Screen 2: The Confession with Visitor Log (Dùng Mock Data) -->
     <div id="confession-screen" class="screen">
         <div class="p-8 bg-white rounded-3xl shadow-xl border border-pink-200 w-full max-w-sm">
             <h2 id="confession-heading" class="text-2xl font-bold text-pink-600 mb-6"></h2>
@@ -656,7 +611,6 @@
                 <button id="yes-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105">
                     Đồng ý
                 </button>
-                <!-- Nút Không đồng ý chạy trốn sẽ dùng position: fixed để chạy khắp màn hình -->
                 <button id="no-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105">
                     Không đồng ý
                 </button>
@@ -665,7 +619,7 @@
                 <h3 class="text-lg font-bold text-gray-700 mb-2">Những người đã ghé thăm:</h3>
                 <p id="visitor-count" class="text-sm text-gray-500 mb-2"></p>
                 <ul id="visitors-list" class="space-y-2 text-left text-gray-800 text-sm max-h-40 overflow-y-auto">
-                    <!-- Visitor names will be populated here -->
+                    <!-- Mock Visitor names will be populated here -->
                 </ul>
                 <button id="change-name-btn" class="mt-4 text-sm text-purple-500 hover:text-purple-600 transition-colors">Đổi tên</button>
             </div>
@@ -690,7 +644,7 @@
         </div>
     </div>
 
-    <!-- Letter Modal (New) -->
+    <!-- Letter Modal -->
     <div id="letter-overlay" class="letter-overlay">
         <div class="letter-content w-full max-w-xl">
             <div id="letter-content-div" class="text-base sm:text-lg">
