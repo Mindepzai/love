@@ -141,7 +141,7 @@
 
         // Firebase global variables
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' && __firebase_config ? __firebase_config : '{}'); // Added check for empty string
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' && __firebase_config ? __firebase_config : '{}'); 
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // Initialize Firebase services
@@ -436,43 +436,34 @@
                     if (user) {
                         userId = user.uid;
                         console.log("Authenticated user with ID:", userId);
+                        // Sử dụng collection public để mọi người thấy nhau
                         visitorsColRef = collection(db, `artifacts/${appId}/public/data/visitors`);
                         
                         checkUserName();
 
-                        // FIX: Loại bỏ orderBy() và thay bằng sắp xếp phía client để tránh lỗi Index Firestore
+                        // FIX QUAN TRỌNG: Loại bỏ mọi logic sắp xếp và xử lý timestamp phức tạp
                         const q = query(visitorsColRef);
                         onSnapshot(q, (snapshot) => {
-                            const visitors = [];
-                            snapshot.forEach((doc) => {
-                                const data = doc.data();
-                                // Chỉ thêm vào danh sách nếu có timestamp hợp lệ để sắp xếp
-                                if (data.timestamp) { 
-                                    visitors.push(data);
-                                }
-                            });
-
-                            // Sắp xếp dữ liệu theo thời gian (giảm dần) trên client
-                            visitors.sort((a, b) => {
-                                const timeA = a.timestamp.toDate().getTime();
-                                const timeB = b.timestamp.toDate().getTime();
-                                return timeB - timeA;
-                            });
-                            
                             visitorsList.innerHTML = '';
-                            visitorCount.textContent = `Tổng cộng: ${visitors.length} người`;
+                            visitorCount.textContent = `Tổng cộng: ${snapshot.size} người`;
                             
-                            visitors.forEach((visitor) => {
+                            snapshot.forEach((doc) => {
+                                const visitor = doc.data();
                                 const li = document.createElement('li');
-                                li.textContent = visitor.name;
+                                // Chỉ hiển thị tên, loại bỏ dependency vào timestamp
+                                li.textContent = visitor.name; 
                                 li.classList.add('p-2', 'bg-gray-100', 'rounded-lg', 'shadow-sm', 'border', 'border-gray-200');
                                 visitorsList.appendChild(li);
                             });
+                        }, (error) => {
+                             // Xử lý lỗi nếu onSnapshot thất bại (thường do lỗi kết nối hoặc quy tắc bảo mật)
+                            console.error("Lỗi khi lắng nghe danh sách khách truy cập:", error);
+                            // Thay vì crash, chỉ hiển thị lỗi và vẫn cho người dùng vào
+                            welcomeMessage.textContent = 'Lỗi cập nhật danh sách khách. Vui lòng thử lại!';
                         });
                         
                     } else {
                         console.error("User not authenticated.");
-                        // Nếu không xác thực được, vẫn chuyển sang màn hình Welcome
                         showScreen('welcome');
                     }
                 });
@@ -495,6 +486,7 @@
                 const visitorDocRef = doc(db, visitorsColRef.path, userId);
                 await setDoc(visitorDocRef, {
                     name: name,
+                    // Vẫn giữ serverTimestamp để ghi lại thời gian tạo (cần thiết cho Firebase)
                     timestamp: serverTimestamp(),
                 });
                 recipientName = name;
