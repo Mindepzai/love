@@ -137,11 +137,11 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, serverTimestamp, query, orderBy, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, serverTimestamp, query, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Firebase global variables
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' && __firebase_config ? __firebase_config : '{}'); // Added check for empty string
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // Initialize Firebase services
@@ -179,9 +179,9 @@
         const confessionHeading = document.getElementById('confession-heading');
         const choiceButtonsContainer = document.getElementById('choice-buttons-container');
         
-        // FIX: Define resultTitle and resultMessage
         const resultTitle = document.getElementById('result-title');
         const resultMessage = document.getElementById('result-message');
+        const welcomeMessage = document.getElementById('welcome-message'); 
         
         // New Letter Elements
         const readLetterBtn = document.getElementById('read-letter-btn');
@@ -289,6 +289,7 @@
                 showScreen('confession');
             } else {
                 showScreen('welcome');
+                welcomeMessage.textContent = 'Bạn tên gì? Nhập tên vào đây nhé!'; 
             }
         };
         
@@ -385,7 +386,7 @@
             event.preventDefault();
 
             const clientX = event.clientX || event.touches[0].clientX;
-            const clientY = event.clientY || event.touches[0].clientY;
+            const clientY = event.touches[0].clientY;
 
             const deltaX = clientX - previousMousePosition.x;
             const deltaY = clientY - previousMousePosition.y;
@@ -420,6 +421,7 @@
             showScreen('loading');
             initThreeDHeart(); // Initialize 3D heart immediately
             try {
+                // Thử khởi tạo Firebase
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -438,12 +440,29 @@
                         
                         checkUserName();
 
-                        const q = query(visitorsColRef, orderBy('timestamp', 'desc'));
+                        // FIX: Loại bỏ orderBy() và thay bằng sắp xếp phía client để tránh lỗi Index Firestore
+                        const q = query(visitorsColRef);
                         onSnapshot(q, (snapshot) => {
-                            visitorsList.innerHTML = '';
-                            visitorCount.textContent = `Tổng cộng: ${snapshot.size} người`;
+                            const visitors = [];
                             snapshot.forEach((doc) => {
-                                const visitor = doc.data();
+                                const data = doc.data();
+                                // Chỉ thêm vào danh sách nếu có timestamp hợp lệ để sắp xếp
+                                if (data.timestamp) { 
+                                    visitors.push(data);
+                                }
+                            });
+
+                            // Sắp xếp dữ liệu theo thời gian (giảm dần) trên client
+                            visitors.sort((a, b) => {
+                                const timeA = a.timestamp.toDate().getTime();
+                                const timeB = b.timestamp.toDate().getTime();
+                                return timeB - timeA;
+                            });
+                            
+                            visitorsList.innerHTML = '';
+                            visitorCount.textContent = `Tổng cộng: ${visitors.length} người`;
+                            
+                            visitors.forEach((visitor) => {
                                 const li = document.createElement('li');
                                 li.textContent = visitor.name;
                                 li.classList.add('p-2', 'bg-gray-100', 'rounded-lg', 'shadow-sm', 'border', 'border-gray-200');
@@ -453,13 +472,14 @@
                         
                     } else {
                         console.error("User not authenticated.");
-                        showScreen('loading');
+                        // Nếu không xác thực được, vẫn chuyển sang màn hình Welcome
+                        showScreen('welcome');
                     }
                 });
             } catch (error) {
                 console.error("Lỗi khi kết nối với Firebase:", error);
                 showScreen('welcome'); 
-                document.getElementById('welcome-message').textContent = 'Lỗi kết nối. Vui lòng thử lại!';
+                welcomeMessage.textContent = 'Lỗi kết nối. Vui lòng thử lại!';
             }
         });
 
